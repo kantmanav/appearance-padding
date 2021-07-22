@@ -10,6 +10,7 @@ import tarfile
 import tempfile
 
 import numpy as np
+import math
 
 from scipy.spatial.distance import cdist
 
@@ -393,7 +394,7 @@ def get_image_features(X, y, appearance_dim=32):
         dict: A dictionary of feature names to np.arrays of shape
             (n, c) or (n, x, y, c) where n is the number of objects.
     """
-    appearance_dim = int(appearance_dim)
+    #appearance_dim = 0
 
     # each feature will be ordered based on the label.
     # labels are also stored and can be fetched by index.
@@ -401,8 +402,9 @@ def get_image_features(X, y, appearance_dim=32):
     labels = np.zeros((num_labels,), dtype='int32')
     centroids = np.zeros((num_labels, 2), dtype='float32')
     morphologies = np.zeros((num_labels, 3), dtype='float32')
-    appearances = np.zeros((num_labels, appearance_dim,
-                            appearance_dim, X.shape[-1]), dtype='float32')
+
+    app_rows = 0
+    app_cols = 0
 
     # iterate over all objects in y
     props = regionprops(y[..., 0], cache=False)
@@ -422,12 +424,39 @@ def get_image_features(X, y, appearance_dim=32):
         ])
         morphologies[i] = morphology
 
+        # Get appearance dimensions
+        minr, minc, maxr, maxc = prop.bbox
+        row = maxr - minr
+        col = maxc - minc
+        if row > app_rows:
+            app_rows = row
+        if col > app_cols:
+            app_cols = col
+
+    appearances = np.zeros((num_labels, app_rows, app_cols, X.shape[-1]),
+                            dtype='float32')
+
+    for i, prop in enumerate(props):
         # Get appearance
         minr, minc, maxr, maxc = prop.bbox
-        appearance = np.copy(X[minr:maxr, minc:maxc, :])
-        resize_shape = (appearance_dim, appearance_dim)
-        appearance = resize(appearance, resize_shape)
-        appearances[i] = appearance
+
+        rows = maxr - minr
+        cols = maxc - minc
+
+        centr = rows / 2
+        centc = cols / 2
+
+        lowr = math.floor(centr - rows / 2)
+        highr = math.floor(centr + rows / 2)
+        lowc = math.floor(centc - cols / 2)
+        highc = math.floor(centc + cols / 2)
+
+        for r in range(lowr, highr):
+            for c in range(lowc, highc):
+                for n in range(X[-1]):
+                    appearances[r, c, n] = X[minr + (r - lowr), minc + (c - lowc), n]
+
+        appearances[i] = appearances
 
     # Get adjacency matrix
     # distance = cdist(centroids, centroids, metric='euclidean') < distance_threshold
