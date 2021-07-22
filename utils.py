@@ -394,7 +394,6 @@ def get_image_features(X, y, appearance_dim=32):
         dict: A dictionary of feature names to np.arrays of shape
             (n, c) or (n, x, y, c) where n is the number of objects.
     """
-    #appearance_dim = 0
 
     # each feature will be ordered based on the label.
     # labels are also stored and can be fetched by index.
@@ -451,10 +450,15 @@ def get_image_features(X, y, appearance_dim=32):
         lowc = math.floor(centc - cols / 2)
         highc = math.floor(centc + cols / 2)
 
+        label = prop.label
         for r in range(lowr, highr):
             for c in range(lowc, highc):
                 for n in range(X[-1]):
-                    appearances[r, c, n] = X[minr + (r - lowr), minc + (c - lowc), n]
+                    pixel = X[minr + (r - lowr), minc + (c - lowc), n]
+                    if pixel == label:
+                        appearances[r, c, n] = pixel
+                    else:
+                        appearances[r, c, n] = 0
 
         appearances[i] = appearances
 
