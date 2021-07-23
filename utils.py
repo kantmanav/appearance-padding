@@ -383,13 +383,35 @@ def is_valid_lineage(lineage):
 
     return True  # all cell lineages are valid!
 
+def get_appearance_dimensions(X, y):
+    """Get the dimensions of the appearance images.
+    Args:
+        X (np.array): a 3D numpy array of raw data of shape (x, y, c).
+        y (np.array): a 3D numpy array of integer labels of shape (x, y, 1).
+    Returns:
+        tuple: A tuple of dimensions of shape (2)."""
+    app_rows = 0
+    app_cols = 0
 
-def get_image_features(X, y, appearance_dim=32):
+    props = regionprops(y[..., 0], cache=False)
+    for prop in props:
+        # Get appearance dimensions
+        minr, minc, maxr, maxc = prop.bbox
+        row = maxr - minr
+        col = maxc - minc
+        if row > app_rows:
+            app_rows = row
+        if col > app_cols:
+            app_cols = col
+
+    return app_rows, app_cols
+
+
+def get_image_features(X, y):
     """Return features for every object in the array.
     Args:
         X (np.array): a 3D numpy array of raw data of shape (x, y, c).
         y (np.array): a 3D numpy array of integer labels of shape (x, y, 1).
-        appearance_dim (int): The resized shape of the appearance feature.
     Returns:
         dict: A dictionary of feature names to np.arrays of shape
             (n, c) or (n, x, y, c) where n is the number of objects.
@@ -402,8 +424,9 @@ def get_image_features(X, y, appearance_dim=32):
     centroids = np.zeros((num_labels, 2), dtype='float32')
     morphologies = np.zeros((num_labels, 3), dtype='float32')
 
-    app_rows = 0
-    app_cols = 0
+    app_rows, app_cols = get_appearance_dimensions(X, y)
+    appearances = np.zeros((num_labels, app_rows, app_cols, X.shape[-1]),
+                            dtype='float32')
 
     # iterate over all objects in y
     props = regionprops(y[..., 0], cache=False)
@@ -423,19 +446,6 @@ def get_image_features(X, y, appearance_dim=32):
         ])
         morphologies[i] = morphology
 
-        # Get appearance dimensions
-        minr, minc, maxr, maxc = prop.bbox
-        row = maxr - minr
-        col = maxc - minc
-        if row > app_rows:
-            app_rows = row
-        if col > app_cols:
-            app_cols = col
-
-    appearances = np.zeros((num_labels, app_rows, app_cols, X.shape[-1]),
-                            dtype='float32')
-
-    for i, prop in enumerate(props):
         # Get appearance
         minr, minc, maxr, maxc = prop.bbox
 
@@ -450,17 +460,19 @@ def get_image_features(X, y, appearance_dim=32):
         lowc = math.floor(centc - cols / 2)
         highc = math.floor(centc + cols / 2)
 
+        appearance = np.zeros((app_rows, app_cols, X.shape[-1]), dtype='float32')
+
         label = prop.label
         for r in range(lowr, highr):
             for c in range(lowc, highc):
                 for n in range(X[-1]):
                     pixel = X[minr + (r - lowr), minc + (c - lowc), n]
                     if pixel == label:
-                        appearances[r, c, n] = pixel
+                        appearance[r, c, n] = pixel
                     else:
-                        appearances[r, c, n] = 0
+                        appearance[r, c, n] = 0
 
-        appearances[i] = appearances
+        appearances[i] = appearance  
 
     # Get adjacency matrix
     # distance = cdist(centroids, centroids, metric='euclidean') < distance_threshold
@@ -542,8 +554,7 @@ def concat_tracks(tracks):
 
 class Track(object):  # pylint: disable=useless-object-inheritance
 
-    def __init__(self, path=None, tracked_data=None,
-                 appearance_dim=32, distance_threshold=64):
+    def __init__(self, path=None, tracked_data=None, distance_threshold=64):
         if tracked_data:
             training_data = tracked_data
         elif path:
@@ -553,7 +564,6 @@ class Track(object):  # pylint: disable=useless-object-inheritance
         self.X = training_data['X'].astype('float32')
         self.y = training_data['y'].astype('int32')
         self.lineages = training_data['lineages']
-        self.appearance_dim = appearance_dim
         self.distance_threshold = distance_threshold
 
         # Correct lineages
@@ -622,7 +632,8 @@ class Track(object):  # pylint: disable=useless-object-inheritance
 
         batch_shape = (n_batches, n_frames, max_tracks)
 
-        appearance_shape = (self.appearance_dim, self.appearance_dim, n_channels)
+        app_rows, app_cols = get_appearance_dimensions(self.X, self.y)
+        appearance_shape = (app_rows, app_cols, n_channels)
 
         appearances = np.zeros(batch_shape + appearance_shape, dtype='float32')
 
@@ -646,8 +657,7 @@ class Track(object):  # pylint: disable=useless-object-inheritance
             for frame in range(n_frames):
 
                 frame_features = get_image_features(
-                    self.X[batch, frame], self.y[batch, frame],
-                    appearance_dim=self.appearance_dim)
+                    self.X[batch, frame], self.y[batch, frame])
 
                 track_ids = frame_features['labels'] - 1
                 centroids[batch, frame, track_ids] = frame_features['centroids']
